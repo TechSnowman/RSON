@@ -1,0 +1,45 @@
+from smbus2 import SMBus
+import time
+
+# MCP3427 I2C address (when A2,A1,A0 = 0)
+I2C_ADDRESS = 0x68
+
+# Configuration byte:
+# RDY = 1 (start a conversion)
+# CH = 0 (Channel 1)
+# MODE = 0 (One-Shot)
+# SAMP = 10 (16-bit, 15 SPS)
+# PGA = 00 (Gain x1)
+CONFIG_BYTE = 0b10010000  # = 0x90
+
+def read_mcp3427():
+    with SMBus(1) as bus:  # I2C bus 1 on Raspberry Pi
+        
+        # Write config to start conversion
+        bus.write_byte(I2C_ADDRESS, CONFIG_BYTE)
+
+        # Wait for conversion (see datasheet timing for 16-bit mode: ~67ms)
+        time.sleep(0.07)
+
+        # Read 3 bytes (MSB, LSB, Config Readback)
+        data = bus.read_i2c_block_data(I2C_ADDRESS, 0, 3)
+        msb = data[0]
+        lsb = data[1]
+        config_read = data[2]
+
+        # Combine MSB and LSB into signed 16-bit integer (2's complement)
+        raw_result = (msb << 8) | lsb
+        if raw_result & 0x8000:
+            raw_result -= 0x10000
+
+        # Calculate voltage (assuming Vref = 2.048V, PGA = 1)
+        voltage = (raw_result / 32768.0) * 2.048  # MCP3427 full scale +/-2.048V
+
+        print(f"Raw ADC result: {raw_result}")
+        print(f"Voltage: {voltage:.4f} V")
+        print(f"Config Readback: 0b{config_read:08b}")
+
+        return raw_result, voltage
+
+# Run once
+read_mcp3427()
