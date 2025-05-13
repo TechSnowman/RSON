@@ -1,45 +1,54 @@
 from smbus2 import SMBus
-import time
 
-# MCP3427 I2C address (when A2,A1,A0 = 0)
-I2C_ADDRESS = 0x68
+# I2C address of AD7291 (7-bit address)
+AD7291_ADDRESS = 0x2F  # 0101111
 
-# Configuration byte:
-# RDY = 1 (start a conversion)
-# CH = 0 (Channel 1)
-# MODE = 0 (One-Shot)
-# SAMP = 10 (16-bit, 15 SPS)
-# PGA = 00 (Gain x1)
-CONFIG_BYTE = 0b10010000  # = 0x90
+# AD7291 Register Addresses (See datasheet Table 12 and Table 13)
+REG_TEMP_RESULT = 0x00
+REG_ALERT_STATUS = 0x01
+REG_CONFIG = 0x02
+REG_CNVRT_RESULT_BASE = 0x10  # Channel 0 result register starts at 0x10
 
-def read_mcp3427():
-    with SMBus(1) as bus:  # I2C bus 1 on Raspberry Pi
-        
-        # Write config to start conversion
-        bus.write_byte(I2C_ADDRESS, CONFIG_BYTE)
+# Initialize I2C bus
+bus = SMBus(1)  # Use I2C bus 1 on Raspberry Pi
 
-        # Wait for conversion (see datasheet timing for 16-bit mode: ~67ms)
-        time.sleep(0.07)
+def read_word(register):
+    """Reads 16-bit word from given register"""
+    raw = bus.read_word_data(AD7291_ADDRESS, register)
+    # Swap bytes due to endianness (AD7291 sends MSB first)
+    swapped = ((raw & 0xFF) << 8) | (raw >> 8)
+    return swapped
 
-        # Read 3 bytes (MSB, LSB, Config Readback)
-        data = bus.read_i2c_block_data(I2C_ADDRESS, 0, 3)
-        msb = data[0]
-        lsb = data[1]
-        config_read = data[2]
+def read_temperature():
+    """Reads internal temperature sensor"""
+    raw = read_word(REG_TEMP_RESULT)
+    # Extract 12-bit data (see datasheet)
+    temp_code = raw & 0x0FFF
+    # Convert to °C (see datasheet equation)
+    temperature_c = (temp_code / 16.0) - 273.0
+    return temperature_c
 
-        # Combine MSB and LSB into signed 16-bit integer (2's complement)
-        raw_result = (msb << 8) | lsb
-        if raw_result & 0x8000:
-            raw_result -= 0x10000
+def read_channel(channel):
+    """Reads ADC result for a given channel (0-7)"""
+    if not 0 <= channel <= 7:
+        raise ValueError("Channel must be 0-7")
+    raw = read_word(REG_CNVRT_RESULT_BASE + channel)
+    adc_code = raw & 0x0FFF
+    # Convert to voltage assuming 2.5V reference and 12-bit range
+    voltage = (adc_code / 4095.0) * 2.5
+    return voltage
 
-        # Calculate voltage (assuming Vref = 2.048V, PGA = 1)
-        voltage = (raw_result / 32768.0) * 2.048  # MCP3427 full scale +/-2.048V
+# Example usage:
+try:
+    temp_c = read_temperature()
+    print(f"Internal Temperature: {temp_c:.2f} °C")
 
-        print(f"Raw ADC result: {raw_result}")
-        print(f"Voltage: {voltage:.4f} V")
-        print(f"Config Readback: 0b{config_read:08b}")
+    for ch in range(8):
+        voltage = read_channel(ch)
+        print(f"ADC Channel {ch}: {voltage:.3f} V")
 
-        return raw_result, voltage
+except Exception as e:
+    print(f"Error communicating with AD7291: {e}")
 
-# Run once
-read_mcp3427()
+finally:
+    bus.close()
