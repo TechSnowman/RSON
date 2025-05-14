@@ -1,54 +1,10 @@
-from smbus2 import SMBus
+import SDL_DS3231
+from datetime import datetime
 
-# I2C address of AD7291 (7-bit address)
-AD7291_ADDRESS = 0x2F  # 0101111
+rtc_device = SDL_DS3231.SDL_DS3231(twi=1, addr=0x68, at24c32_addr=0x57)
 
-# AD7291 Register Addresses (See datasheet Table 12 and Table 13)
-REG_TEMP_RESULT = 0x00
-REG_ALERT_STATUS = 0x01
-REG_CONFIG = 0x02
-REG_CNVRT_RESULT_BASE = 0x10  # Channel 0 result register starts at 0x10
+rtc_time_utc = rtc_device.read_datetime()
+print(f"time is {rtc_time_utc}")
 
-# Initialize I2C bus
-bus = SMBus(1)  # Use I2C bus 1 on Raspberry Pi
-
-def read_word(register):
-    """Reads 16-bit word from given register"""
-    raw = bus.read_word_data(AD7291_ADDRESS, register)
-    # Swap bytes due to endianness (AD7291 sends MSB first)
-    swapped = ((raw & 0xFF) << 8) | (raw >> 8)
-    return swapped
-
-def read_temperature():
-    """Reads internal temperature sensor"""
-    raw = read_word(REG_TEMP_RESULT)
-    # Extract 12-bit data (see datasheet)
-    temp_code = raw & 0x0FFF
-    # Convert to °C (see datasheet equation)
-    temperature_c = (temp_code / 16.0) - 273.0
-    return temperature_c
-
-def read_channel(channel):
-    """Reads ADC result for a given channel (0-7)"""
-    if not 0 <= channel <= 7:
-        raise ValueError("Channel must be 0-7")
-    raw = read_word(REG_CNVRT_RESULT_BASE + channel)
-    adc_code = raw & 0x0FFF
-    # Convert to voltage assuming 2.5V reference and 12-bit range
-    voltage = (adc_code / 4095.0) * 2.5
-    return voltage
-
-# Example usage:
-try:
-    temp_c = read_temperature()
-    print(f"Internal Temperature: {temp_c:.2f} °C")
-
-    for ch in range(8):
-        voltage = read_channel(ch)
-        print(f"ADC Channel {ch}: {voltage:.3f} V")
-
-except Exception as e:
-    print(f"Error communicating with AD7291: {e}")
-
-finally:
-    bus.close()
+temperature_celsius = rtc_device.getTemp()
+print(f"temperature is {temperature_celsius}°")
